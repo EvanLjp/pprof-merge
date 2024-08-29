@@ -16,38 +16,63 @@ package main
 
 import (
 	"flag"
+	"io/fs"
 	"log"
 	"os"
+	"path/filepath"
+	"regexp"
 
 	"github.com/google/pprof/profile"
 )
 
 var (
-	output string
+	output  string
+	pattern string
+	path    string
 )
 
 func main() {
 	flag.StringVar(&output, "o", "merged.data", "")
+	flag.StringVar(&pattern, "p", ".*pprof", "")
+	flag.StringVar(&path, "d", "./", "")
 	flag.Parse()
 
-	files := os.Args[1:]
-	if len(files) == 0 {
-		log.Fatal("Give profiles files as arguments")
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		panic(err)
 	}
+	reg, err := regexp.Compile(pattern)
+	if err != nil {
+		panic(err)
 
+	}
 	var profiles []*profile.Profile
-	for _, fname := range files {
-		f, err := os.Open(fname)
-		if err != nil {
-			log.Fatalf("Cannot open profile file at %q: %v", fname, err)
+	filepath.Walk(absPath, func(path string, info fs.FileInfo, err error) error {
+		if info.IsDir() {
+			return nil
 		}
-		p, err := profile.Parse(f)
 		if err != nil {
-			log.Fatalf("Cannot parse profile at %q: %v", fname, err)
+			return err
 		}
-		profiles = append(profiles, p)
-	}
+		if reg.MatchString(path) {
+			f, err := os.Open(path)
+			if err != nil {
+				log.Println("Cannot open profile file at %q: %v", path, err)
+				return nil
+			}
+			p, err := profile.Parse(f)
+			if err != nil {
+				log.Println("Cannot parse profile at %q: %v", path, err)
+				return nil
+			}
+			profiles = append(profiles, p)
+		}
+		return nil
+	})
+	if len(profiles) == 0 {
+		return
 
+	}
 	merged, err := profile.Merge(profiles)
 	if err != nil {
 		log.Fatalf("Cannot merge profiles: %v", err)
